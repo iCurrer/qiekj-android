@@ -1,0 +1,4 @@
+<resources>
+    <!-- 深色模式窗口底色 -->
+    <color name="window_background">#191C1C</color>
+</resources>

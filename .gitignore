@@ -1,12 +1,35 @@
+# ---- Gradle / 构建产物 ----
 .gradle/
 .build-tools/
 build/
 app/build/
+.kotlin/
+
+# ---- 本机配置（含 SDK 路径，禁止提交）----
 local.properties
+keystore.properties
+
+# ---- 签名与安装包 ----
 *.apk
 *.aab
 *.jks
 *.keystore
+
+# ---- 日志与诊断 ----
 *.log
+*.hprof
+captures/
+
+# ---- IDE ----
 .idea/
 *.iml
+.cxx/
+.vscode/
+
+# ---- 工具目录（项目记忆 / 规划文档 / WorkBuddy 数据，非源码）----
+.workbuddy/
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini

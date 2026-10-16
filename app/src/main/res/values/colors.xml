@@ -1,3 +1,7 @@
 <resources>
-    <color name="ic_launcher_background">#F7F7F2</color>
+    <!-- 应用图标 / 启动页背景：品牌青绿 -->
+    <color name="ic_launcher_background">#00696D</color>
+    <color name="splash_background">#00696D</color>
+    <!-- 窗口底色（深色模式在 values-night 覆盖） -->
+    <color name="window_background">#FAFDFC</color>
 </resources>

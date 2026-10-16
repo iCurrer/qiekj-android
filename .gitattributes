@@ -1,0 +1,22 @@
+# 统一换行符：仓库内一律存 LF，避免 Windows / macOS 协作时整文件 diff
+* text=auto eol=lf
+
+# Windows 批处理必须保留 CRLF —— cmd.exe 解析纯 LF 的脚本不可靠
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行符转换
+*.jar    binary
+*.apk    binary
+*.aab    binary
+*.so     binary
+*.jks    binary
+*.keystore binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.webp   binary
+*.ttf    binary
+
+# 语言统计修正：Gradle Kotlin DSL 按 Kotlin 归类，而不是被当成 Groovy
+*.gradle.kts linguist-language=Kotlin

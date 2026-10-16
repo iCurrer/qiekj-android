@@ -1,7 +1,17 @@
 <resources>
-    <style name="Theme.DeviceControl" parent="android:style/Theme.Material.Light.NoActionBar">
+    <!-- 启动主题：冷启动瞬间展示品牌色 + 图标，随后切入主主题 -->
+    <style name="Theme.XiaoGuai.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimationDuration">400</item>
+        <item name="postSplashScreenTheme">@style/Theme.XiaoGuai</item>
+    </style>
+
+    <!-- 主主题：沉浸式系统栏，内容由 Compose 绘制 -->
+    <style name="Theme.XiaoGuai" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">#FAFAF8</item>
-        <item name="android:statusBarColor">#FAFAF8</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 </resources>

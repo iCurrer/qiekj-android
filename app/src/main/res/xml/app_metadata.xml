@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用级 AppFunctions 元数据。
+  由 AndroidManifest.xml 中的
+  <property android:name="android.app.appfunctions.app_metadata" /> 引用。
+  description 用于引导大模型理解本应用整体能做什么；单条函数的描述来自各处 @AppFunction 的 KDoc。
+-->
+<AppFunctionAppMetadata xmlns:appfn="http://schemas.android.com/apk/res-auto"
+    appfn:description="小乖生活（XiaoGuai Life）用于管理共享设备，供 AI 助手代用户完成设备相关操作。&#10;&#10;Operational Patterns:&#10;- 解锁任何设备前，必须先调用 listDevices 取得准确的设备名称。&#10;- 查询余额或执行积分任务前，需确认用户已在本应用内登录。&#10;&#10;Constraints:&#10;- unlockDevice 会产生真实订单与真实扣费，且结果不可撤销；调用前必须获得用户的明确确认。&#10;- unlockDevice 会持续等待到本次使用结束才返回结算信息，耗时较长。"
+    appfn:displayDescription="@string/app_function_display_description" />
