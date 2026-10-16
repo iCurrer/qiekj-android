@@ -34,8 +34,8 @@ android {
         applicationId = "ltd.fky.devicecontrol"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "5.2"
+        versionCode = 12
+        versionName = "5.3"
 
         ndk {
             // ML Kit 的条码模型是 native 库，每个 ABI 各一份（arm64 约 4.9MB、x86 约 6.1MB），

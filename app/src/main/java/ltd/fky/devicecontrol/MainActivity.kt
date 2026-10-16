@@ -14,8 +14,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Devices
@@ -25,6 +29,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -53,7 +60,11 @@ import ltd.fky.devicecontrol.ui.AppUiState
 import ltd.fky.devicecontrol.ui.AppViewModel
 import ltd.fky.devicecontrol.ui.AppViewModelFactory
 import ltd.fky.devicecontrol.ui.DeviceTab
+import ltd.fky.devicecontrol.ui.PageWidth
+import ltd.fky.devicecontrol.ui.PageWidthBox
+import ltd.fky.devicecontrol.ui.WindowWidthClass
 import ltd.fky.devicecontrol.ui.component.RunningTaskBar
+import ltd.fky.devicecontrol.ui.rememberWindowWidthClass
 import ltd.fky.devicecontrol.ui.dialog.ConfirmDialog
 import ltd.fky.devicecontrol.ui.dialog.DeviceActionDialog
 import ltd.fky.devicecontrol.ui.dialog.HiddenDevicesDialog
@@ -223,54 +234,96 @@ private fun DeviceControlApp(vm: AppViewModel) {
 
     BackHandler(enabled = route != null) { vm.closeRoute() }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            if (route == null) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                    DeviceNavItem(
-                        selected = state.currentTab == DeviceTab.Control,
-                        onClick = { vm.selectTab(DeviceTab.Control) },
-                        icon = Icons.Outlined.Devices,
-                        label = "设备",
-                    )
-                    DeviceNavItem(
-                        selected = state.currentTab == DeviceTab.Me,
-                        onClick = { vm.selectTab(DeviceTab.Me) },
-                        icon = Icons.Outlined.Person,
-                        label = "我的",
-                    )
-                }
+    val useNavRail = rememberWindowWidthClass() != WindowWidthClass.Compact
+
+    // 宽屏把导航从底部挪到左侧。两个理由：
+    // ① 平板横置时底部栏离拇指很远，够不着；
+    // ② 底部栏会白吃一整条横向空间，而宽屏恰恰是横向空间最富余的场景。
+    Row(modifier = Modifier.fillMaxSize()) {
+        if (useNavRail) {
+            NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                Spacer(Modifier.height(12.dp))
+                DeviceRailItem(
+                    selected = state.currentTab == DeviceTab.Control,
+                    onClick = {
+                        if (route != null) vm.closeRoute()
+                        vm.selectTab(DeviceTab.Control)
+                    },
+                    icon = Icons.Outlined.Devices,
+                    label = "设备",
+                )
+                DeviceRailItem(
+                    selected = state.currentTab == DeviceTab.Me,
+                    onClick = {
+                        if (route != null) vm.closeRoute()
+                        vm.selectTab(DeviceTab.Me)
+                    },
+                    icon = Icons.Outlined.Person,
+                    label = "我的",
+                )
             }
-        },
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            TabLayer(state = state, vm = vm)
+        }
 
-            if (route != null) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    when (route) {
-                        AppRoute.PointsTask -> PointsTaskScreen(
-                            state = state,
-                            vm = vm,
-                            onBack = vm::closeRoute,
+        Scaffold(
+            modifier = Modifier.weight(1f),
+            containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                if (route == null && !useNavRail) {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                        DeviceNavItem(
+                            selected = state.currentTab == DeviceTab.Control,
+                            onClick = { vm.selectTab(DeviceTab.Control) },
+                            icon = Icons.Outlined.Devices,
+                            label = "设备",
                         )
-
-                        AppRoute.Guide -> GuideScreen(onBack = vm::closeRoute)
-                        AppRoute.About -> AboutScreen(onBack = vm::closeRoute)
-
-                        AppRoute.Scan -> ScanScreen(
-                            onBack = vm::closeRoute,
-                            onScanned = vm::handleScannedCode,
+                        DeviceNavItem(
+                            selected = state.currentTab == DeviceTab.Me,
+                            onClick = { vm.selectTab(DeviceTab.Me) },
+                            icon = Icons.Outlined.Person,
+                            label = "我的",
                         )
+                    }
+                }
+            },
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+            ) {
+                TabLayer(state = state, vm = vm)
+
+                if (route != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        when (route) {
+                            // 二级页按内容类型限宽：长文阅读窄、日志宽、相机取景最窄
+                            AppRoute.PointsTask -> PageWidthBox(PageWidth.Wide) {
+                                PointsTaskScreen(
+                                    state = state,
+                                    vm = vm,
+                                    onBack = vm::closeRoute,
+                                )
+                            }
+
+                            AppRoute.Guide -> PageWidthBox(PageWidth.Regular) {
+                                GuideScreen(onBack = vm::closeRoute)
+                            }
+
+                            AppRoute.About -> PageWidthBox(PageWidth.Regular) {
+                                AboutScreen(onBack = vm::closeRoute)
+                            }
+
+                            AppRoute.Scan -> PageWidthBox(PageWidth.Narrow) {
+                                ScanScreen(
+                                    onBack = vm::closeRoute,
+                                    onScanned = vm::handleScannedCode,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -328,6 +381,34 @@ private fun RowScope.DeviceNavItem(
         icon = { Icon(icon, contentDescription = label) },
         label = { Text(label, style = MaterialTheme.typography.labelMedium) },
         colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
+}
+
+/**
+ * 宽屏左侧导航项。
+ *
+ * 与底部导航沿用同一套配色令牌，保证窗口跨过 600dp 断点、
+ * 导航在「底部 ⇄ 左侧」之间切换时视觉是连续的。
+ */
+@Composable
+private fun ColumnScope.DeviceRailItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: ImageVector,
+    label: String,
+) {
+    NavigationRailItem(
+        selected = selected,
+        onClick = onClick,
+        icon = { Icon(icon, contentDescription = label) },
+        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+        colors = NavigationRailItemDefaults.colors(
             selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
             selectedTextColor = MaterialTheme.colorScheme.onSurface,
             indicatorColor = MaterialTheme.colorScheme.primaryContainer,

@@ -2,18 +2,16 @@ package ltd.fky.devicecontrol.ui.screen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Person
@@ -33,6 +31,8 @@ import ltd.fky.devicecontrol.ui.AppRoute
 import ltd.fky.devicecontrol.ui.AppUiState
 import ltd.fky.devicecontrol.ui.AppViewModel
 import ltd.fky.devicecontrol.ui.DeviceTab
+import ltd.fky.devicecontrol.ui.PageContainer
+import ltd.fky.devicecontrol.ui.PageWidth
 import ltd.fky.devicecontrol.ui.component.BalanceSummaryBar
 import ltd.fky.devicecontrol.ui.component.DeviceCard
 import ltd.fky.devicecontrol.ui.component.EmptyState
@@ -51,6 +51,9 @@ import ltd.fky.devicecontrol.ui.pinDeviceShortcut
  *
  * 列表渲染的是 `deviceRows` —— 服务端数据叠加本地偏好后的结果：
  * 隐藏项已过滤、收藏置顶、别名生效；被隐藏的可在底部入口恢复。
+ *
+ * 宽屏下设备列表走**自适应网格**：卡片保持接近方形的比例，
+ * 而不是被拉伸成贯穿整屏的扁条。
  */
 @Composable
 internal fun ControlScreen(
@@ -59,11 +62,7 @@ internal fun ControlScreen(
 ) {
     val context = LocalContext.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-    ) {
+    PageContainer(maxWidth = PageWidth.Grid) {
         Spacer(Modifier.height(14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -132,10 +131,14 @@ internal fun ControlScreen(
                     },
                 )
 
-                else -> LazyColumn(
+                else -> LazyVerticalGrid(
+                    // 手机竖屏只够一列（340dp 是卡片的舒适下限），
+                    // 平板会自动排到两列，卡片不再被拉扁
+                    columns = GridCells.Adaptive(minSize = 320.dp),
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(bottom = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(items = state.deviceRows, key = { it.key }) { row ->
                         DeviceCard(

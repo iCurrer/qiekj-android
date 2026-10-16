@@ -5,15 +5,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
@@ -39,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import ltd.fky.devicecontrol.ui.AppRoute
 import ltd.fky.devicecontrol.ui.AppUiState
 import ltd.fky.devicecontrol.ui.AppViewModel
+import ltd.fky.devicecontrol.ui.PageContainer
+import ltd.fky.devicecontrol.ui.PageWidth
 import ltd.fky.devicecontrol.ui.component.ActionRow
 import ltd.fky.devicecontrol.ui.component.BalanceRow
 import ltd.fky.devicecontrol.ui.component.PageTitle
@@ -52,6 +51,9 @@ import ltd.fky.devicecontrol.ui.openProjectHome
  * 承载所有以「账号」为粒度的内容：登录、积分任务、订单、资产。
  * 积分任务从原来的独立 Tab 下沉到这里 —— 它与订单、资产同级，
  * 不该占用一个常驻的底部入口。
+ *
+ * 宽屏下内容限宽居中：这一页全是表单与列表行，
+ * 拉满整屏会让输入框和行文字跨度过大、难以聚焦。
  */
 @Composable
 internal fun MeScreen(
@@ -60,12 +62,7 @@ internal fun MeScreen(
 ) {
     val context = LocalContext.current
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
-    ) {
+    PageContainer(maxWidth = PageWidth.Regular, scrollable = true) {
         Spacer(Modifier.height(14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
