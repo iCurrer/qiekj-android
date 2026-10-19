@@ -34,8 +34,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import ltd.fky.devicecontrol.data.OrderHistoryItem
 import ltd.fky.devicecontrol.data.UnlockResult
+import ltd.fky.devicecontrol.data.UsageStats
+import ltd.fky.devicecontrol.data.usageStatsSince
 import ltd.fky.devicecontrol.ui.DeviceRow
 
 /** Token 展示对话框（等宽字体便于核对）。 */
@@ -140,6 +146,8 @@ internal fun OrderHistoryDialog(
     onDismiss: () -> Unit,
     onOpenOrder: (OrderHistoryItem) -> Unit,
 ) {
+    // 只在订单集变化时重算，避免每次重组都把整份历史遍历一遍
+    val stats = remember(orders) { orders.usageStatsSince(startOfThisMonth()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("历史订单") },
@@ -148,6 +156,14 @@ internal fun OrderHistoryDialog(
                 Text("暂无历史订单", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 LazyColumn {
+                    // 汇总做成列表的第一项，而不是套在 LazyColumn 外面：
+                    // AlertDialog 的高度约束只落在可滚动区域上，外面再包一层 Column
+                    // 会让 LazyColumn 拿到无限高度约束而崩掉
+                    item {
+                        UsageSummary(stats)
+                        Spacer(Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                     items(orders) { item ->
                         OrderHistoryRow(item = item, onClick = { onOpenOrder(item) })
                     }
@@ -162,6 +178,36 @@ internal fun OrderHistoryDialog(
     )
 }
 
+/** 本月使用汇总：解锁次数 / 消耗小票 / 原价合计。 */
+@Composable
+private fun UsageSummary(stats: UsageStats) {
+    Column {
+        Text("本月使用", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SummaryCell("解锁次数", "${stats.count} 次")
+            SummaryCell("消耗小票", stats.ticketText)
+            SummaryCell("原价合计", stats.originText)
+        }
+    }
+}
+
+@Composable
+private fun SummaryCell(label: String, value: String) {
+    Column {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+    }
+}
+
 @Composable
 private fun OrderHistoryRow(item: OrderHistoryItem, onClick: () -> Unit) {
     Column(
@@ -170,10 +216,27 @@ private fun OrderHistoryRow(item: OrderHistoryItem, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
     ) {
-        Text(item.goodsName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                item.goodsName,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            // 清一色已完成的列表里出现这一条，说明上次解锁没走到结算
+            // （通常是等待期间进程被系统回收）
+            if (item.isRunning) {
+                Text(
+                    "进行中",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         Spacer(Modifier.height(4.dp))
         Text(
-            "订单：${item.orderNo}",
+            "${HISTORY_TIME_FORMAT.format(Instant.ofEpochMilli(item.completedAt))} · 订单 ${item.orderNo}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -187,6 +250,17 @@ private fun OrderHistoryRow(item: OrderHistoryItem, onClick: () -> Unit) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
+
+/** 历史记录的时间显示；精确到分钟足够，也不至于把列表挤变形。 */
+private val HISTORY_TIME_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
+
+/** 本月 1 日 0 点的毫秒时间戳，用于「本月使用」统计口径。 */
+private fun startOfThisMonth(): Long = LocalDate.now()
+    .withDayOfMonth(1)
+    .atStartOfDay(ZoneId.systemDefault())
+    .toInstant()
+    .toEpochMilli()
 
 /** 设备操作菜单：重命名 / 收藏 / 隐藏。 */
 @Composable

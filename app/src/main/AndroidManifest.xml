@@ -2,6 +2,8 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 长任务（积分任务 / 解锁）跑完后的结果提醒；Android 13 起需运行时授权 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 相机不是必需硬件：没有相机的设备仍可安装，只是用不了扫码入口 -->
     <uses-feature
@@ -15,6 +17,7 @@
         android:name=".DeviceControlApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -32,6 +35,17 @@
             android:exported="true"
             android:permission="android.permission.BIND_APP_FUNCTION_SERVICE"
             tools:targetApi="36">
+
+            <!--
+              告诉系统去 assets/ 里读哪个 XML 来建函数索引。
+              值必须是 appFunctionXmlFileName（见 DeviceControlAppFunctions.kt）加上 .xml，
+              写错不会有报错，只会让系统静默索引到 0 个函数。
+              系统安装时由 AppsIndexerManagerService 读取本属性，解析后写入 AppSearch。
+            -->
+            <property
+                android:name="android.app.appfunctions.v2"
+                android:value="xiaoguai_app_functions.xml" />
+
             <intent-filter>
                 <action android:name="android.app.appfunctions.AppFunctionService" />
             </intent-filter>

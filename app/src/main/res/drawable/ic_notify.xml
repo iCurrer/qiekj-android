@@ -1,0 +1,15 @@
+<!--
+  通知栏小图标。
+
+  系统会把小图标当作纯 alpha 蒙版渲染（忽略其中的颜色），所以这里只保证轮廓清晰：
+  一个水滴，与应用「喝水」的场景一致。用 mipmap 里的启动图标当小图标会渲染成一团白块。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,3C12,3 6,10 6,14.5C6,17.8 8.7,20.5 12,20.5C15.3,20.5 18,17.8 18,14.5C18,10 12,3 12,3Z" />
+</vector>

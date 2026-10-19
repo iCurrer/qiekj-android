@@ -112,7 +112,22 @@ data class OrderHistoryItem(
     val integralCost: String,
     val otherPromotions: List<PromotionSummary>,
     val completedAt: Long,
+    /**
+     * 订单状态。`"running"` 表示「服务端已受理解锁、但设备还没跑完」。
+     *
+     * **必须可空**：这是后加的字段，本机已存的历史记录里没有它。
+     * Moshi 对**可空**字段允许 JSON 中缺失（填 null），对**非可空**字段会直接抛
+     * `JsonDataException`；而 `OrderHistoryStore.list()` 是
+     * `runCatching { ... }.getOrDefault(emptyList())` —— 一旦解析抛异常，
+     * 用户已有的整段历史会被静默读成空列表。可空是这里唯一安全的写法。
+     */
+    val status: String? = null,
+    /** 解锁时用的 skuId，留作中断后按订单对账。 */
+    val skuId: String? = null,
 ) {
+    /** 是否为「已受理、未结算」的进行中订单。 */
+    val isRunning: Boolean get() = status == STATUS_RUNNING
+
     fun toUnlockResult(): UnlockResult = UnlockResult(
         orderNo = orderNo,
         orderId = orderId,
@@ -121,5 +136,43 @@ data class OrderHistoryItem(
         integralCost = integralCost,
         otherPromotions = otherPromotions,
         completedAt = completedAt,
+    )
+
+    companion object {
+        /** 已受理、等待设备跑完。 */
+        const val STATUS_RUNNING = "running"
+
+        /** 已结算完成；也是历史数据缺失 [status] 时的语义。 */
+        const val STATUS_DONE = "done"
+    }
+}
+
+/**
+ * 使用统计。
+ *
+ * 只统计**已完成**的订单：进行中那条的花费还是未知的（`ticketCost` 为 `"-"`），
+ * 计进去会把金额算小，反而失真。
+ */
+data class UsageStats(
+    val count: Int,
+    val ticketTotal: Double,
+    val originTotal: Double,
+) {
+    val ticketText: String get() = "%.2f".format(ticketTotal)
+    val originText: String get() = "%.2f".format(originTotal)
+}
+
+/**
+ * 统计 [sinceMillis] 之后完成的订单。
+ *
+ * 金额在服务端是字符串、且未结算时为 `"-"`，所以统一 `toDoubleOrNull` 兜底成 0，
+ * 不对格式做任何假设。
+ */
+fun List<OrderHistoryItem>.usageStatsSince(sinceMillis: Long): UsageStats {
+    val done = filter { !it.isRunning && it.completedAt >= sinceMillis }
+    return UsageStats(
+        count = done.size,
+        ticketTotal = done.sumOf { it.ticketCost.toDoubleOrNull() ?: 0.0 },
+        originTotal = done.sumOf { it.originPrice.toDoubleOrNull() ?: 0.0 },
     )
 }

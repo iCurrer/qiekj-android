@@ -147,9 +147,21 @@ private fun CameraPreview(
     val executor = remember { Executors.newSingleThreadExecutor() }
     // 只回调一次：识别到之后相机仍在出帧，避免重复触发
     val handled = remember { AtomicBoolean(false) }
+    // 识别器提到组合层持有，才能在这里统一释放
+    val scanner = remember {
+        BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build(),
+        )
+    }
 
     DisposableEffect(Unit) {
-        onDispose { executor.shutdown() }
+        onDispose {
+            // 识别器与线程池都要释放，否则离开页面后仍占着资源
+            scanner.close()
+            executor.shutdown()
+        }
     }
 
     AndroidView(
@@ -168,11 +180,6 @@ private fun CameraPreview(
                     val analysis = ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
-                    val scanner = BarcodeScanning.getClient(
-                        BarcodeScannerOptions.Builder()
-                            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                            .build(),
-                    )
                     analysis.setAnalyzer(executor) { proxy ->
                         analyzeFrame(proxy, scanner) { value ->
                             if (handled.compareAndSet(false, true)) onScanned(value)

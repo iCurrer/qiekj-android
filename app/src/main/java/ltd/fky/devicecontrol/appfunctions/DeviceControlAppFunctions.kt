@@ -8,14 +8,9 @@ import androidx.appfunctions.AppFunctionService
 import androidx.appfunctions.AppFunctionServiceEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.glance.appwidget.updateAll
+import ltd.fky.devicecontrol.DeviceControlApplication
 import ltd.fky.devicecontrol.data.AppRepository
-import ltd.fky.devicecontrol.data.DeviceCacheStore
-import ltd.fky.devicecontrol.data.DevicePrefsStore
-import ltd.fky.devicecontrol.data.OrderHistoryStore
 import ltd.fky.devicecontrol.data.PointsTaskRunner
-import ltd.fky.devicecontrol.data.TokenStore
-import ltd.fky.devicecontrol.widget.DeviceGlanceWidget
 
 /**
  * 「小乖生活」对外暴露的 AppFunctions（Android MCP 工具）。
@@ -31,16 +26,14 @@ import ltd.fky.devicecontrol.widget.DeviceGlanceWidget
 )
 abstract class BaseXiaoGuaiAppFunctionService : AppFunctionService() {
 
-    private val repository: AppRepository by lazy {
-        AppRepository(
-            tokenStore = TokenStore(applicationContext),
-            orderHistoryStore = OrderHistoryStore(applicationContext),
-            deviceCacheStore = DeviceCacheStore(applicationContext),
-            devicePrefsStore = DevicePrefsStore(applicationContext),
-            // AI 刷新设备后同样刷新桌面卡片，避免卡片数据滞后
-            onDevicesChanged = { DeviceGlanceWidget().updateAll(applicationContext) },
-        )
-    }
+    /**
+     * 复用 Application 持有的全进程唯一仓库。
+     *
+     * 本服务与 Activity 生命周期无关；若各自新建一份，就会出现
+     * 「同一个账号、两套缓存、两份连接池」—— token 与设备快照都可能不同步。
+     */
+    private val repository: AppRepository
+        get() = (applicationContext as DeviceControlApplication).repository
 
     /**
      * 列出当前账号最近使用过的共享设备及其名称。

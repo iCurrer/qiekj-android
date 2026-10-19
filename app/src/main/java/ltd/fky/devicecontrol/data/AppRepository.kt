@@ -10,6 +10,7 @@ import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
+import ltd.fky.devicecontrol.BuildConfig
 
 class AppRepository(
     private val tokenStore: TokenStore,
@@ -28,7 +29,12 @@ class AppRepository(
 
     init {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            // BASIC 只记方法 / URL / 耗时，开销很小，但生产包不该带任何请求日志
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BASIC
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
         val client = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
@@ -52,6 +58,18 @@ class AppRepository(
     }
 
     fun localToken(): String? = tokenStore.readToken()
+
+    /**
+     * 预热加密存储。
+     *
+     * 首次 [localToken] 会触发 `EncryptedSharedPreferences` 的创建（走 AndroidKeyStore），
+     * 这一步可能耗时几十到几百毫秒。由 Application 在后台线程调用，
+     * 把这份开销从冷启动的主线程路径上挪走；调用之后 token 也会进内存缓存，
+     * 后续（含 OkHttp 拦截器的每次请求）都不再触碰磁盘。
+     */
+    fun warmUp() {
+        tokenStore.readToken()
+    }
 
     /**
      * 退出登录：清空本地 token 与设备快照。
@@ -226,6 +244,27 @@ class AppRepository(
         val orderNo = unlock.orderNo ?: error("未获取到订单号")
         onStep("设备已启动，等待使用结束")
 
+        // 先落一条「进行中」记录。
+        //
+        // 小票在解锁被服务端受理的那一刻就已扣除，而结算要等设备跑完 ——
+        // 这段等待可能长达二十多分钟。若进程在此期间被系统回收（切后台 + 锁屏进 Doze
+        // 完全可能），没有这条记录的话，用户看到的就是「钱花了、订单历史里什么都没有」。
+        // 先占位，至少留下「哪台设备、什么时候」。
+        orderHistoryStore.add(
+            OrderHistoryItem(
+                orderNo = orderNo,
+                orderId = "",
+                goodsName = device.goodsName.ifBlank { "未命名设备" },
+                originPrice = "-",
+                ticketCost = "-",
+                integralCost = "-",
+                otherPromotions = emptyList(),
+                completedAt = System.currentTimeMillis(),
+                status = OrderHistoryItem.STATUS_RUNNING,
+                skuId = skuId,
+            ),
+        )
+
         var lastStatus: SyncData
         do {
             delay(1000)
@@ -260,8 +299,11 @@ class AppRepository(
             otherPromotions = otherPromotions,
             completedAt = System.currentTimeMillis(),
         )
-        orderHistoryStore.add(
-            OrderHistoryItem(
+        // 用最终结果替换掉开始那条「进行中」：结算后服务端可能下发新的订单号
+        // （上面的 identify），只按最终号覆盖会留下永远「进行中」的孤儿记录
+        orderHistoryStore.complete(
+            runningOrderNo = orderNo,
+            item = OrderHistoryItem(
                 orderNo = result.orderNo,
                 orderId = result.orderId,
                 goodsName = device.goodsName.ifBlank { "未命名设备" },
@@ -270,6 +312,8 @@ class AppRepository(
                 integralCost = result.integralCost,
                 otherPromotions = result.otherPromotions,
                 completedAt = result.completedAt,
+                status = OrderHistoryItem.STATUS_DONE,
+                skuId = skuId,
             ),
         )
         return result

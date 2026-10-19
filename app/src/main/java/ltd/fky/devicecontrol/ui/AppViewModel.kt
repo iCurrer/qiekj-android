@@ -9,9 +9,15 @@ import ltd.fky.devicecontrol.data.DeviceItem
 import ltd.fky.devicecontrol.data.DevicePref
 import ltd.fky.devicecontrol.data.OrderHistoryItem
 import ltd.fky.devicecontrol.data.prefKey
+import ltd.fky.devicecontrol.data.PointsTaskResult
 import ltd.fky.devicecontrol.data.PointsTaskRunner
 import ltd.fky.devicecontrol.data.ScanDeviceResult
 import ltd.fky.devicecontrol.data.UnlockResult
+import ltd.fky.devicecontrol.notification.AppNotifier
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -68,7 +74,6 @@ data class AppUiState(
     val loadingBalance: Boolean = false,
     val unlocking: Boolean = false,
     val runningPointsTask: Boolean = false,
-    val pointsLogs: List<String> = emptyList(),
     val pointsTaskLastResult: String? = null,
     /** 正在用扫码结果换取设备信息。 */
     val scanning: Boolean = false,
@@ -102,6 +107,7 @@ data class AppUiState(
 
 class AppViewModel(
     private val repository: AppRepository,
+    private val notifier: AppNotifier,
 ) : ViewModel() {
     private val pointsTaskRunner = PointsTaskRunner { repository.localToken() }
     private var pendingShortcutRequest: DeviceShortcutRequest? = null
@@ -112,6 +118,21 @@ class AppViewModel(
         ),
     )
     val state: StateFlow<AppUiState> = _state
+
+    /**
+     * 积分任务日志**单独成流**，不放进 [AppUiState]。
+     *
+     * 它是全 App 唯一高频刷新的字段：任务执行时日志逐行产生。
+     * 而主界面对 [AppUiState] 是整份 `collectAsState()`，任何字段变化都会让整棵树重组 ——
+     * 日志若混在里面，每来一行都会连带重组设备网格与资产速览条。
+     * 拆出来后，日志刷新只影响真正读它的那个日志窗。
+     */
+    private val _pointsLogs = MutableStateFlow<List<String>>(emptyList())
+    val pointsLogs: StateFlow<List<String>> = _pointsLogs
+
+    /** 待提交的日志行，见 [appendPointLog]。 */
+    private val pendingLogs = mutableListOf<String>()
+    private var logFlushJob: Job? = null
 
     init {
         _state.update { it.copy(devicePrefs = repository.devicePrefs()) }
@@ -203,6 +224,12 @@ class AppViewModel(
         viewModelScope.launch {
             repository.logout()
             pendingShortcutRequest = null
+            // 任务日志属于上一个账号的执行记录，随退出一起清掉
+            // （原来日志在 AppUiState 里，重建 state 时天然被清空，拆出去后要显式处理）
+            logFlushJob?.cancel()
+            logFlushJob = null
+            synchronized(pendingLogs) { pendingLogs.clear() }
+            _pointsLogs.value = emptyList()
             _state.update {
                 AppUiState(
                     currentTab = DeviceTab.Me,
@@ -418,6 +445,7 @@ class AppViewModel(
 
     fun unlock(device: DeviceItem) = viewModelScope.launch {
         if (state.value.unlocking) return@launch
+        val deviceName = device.goodsName.ifBlank { "未命名设备" }
         runCatching {
             _state.update { it.copy(unlocking = true, unlockStatus = "准备解锁") }
             repository.unlockDevice(device) { step ->
@@ -433,41 +461,83 @@ class AppViewModel(
                 )
             }
             showToast("解锁成功！订单原价：${result.originPrice}，花费小票：${result.ticketCost}")
+            notifier.notifyUnlockFinished(deviceName, result.ticketCost)
             refreshBalance()
         }.onFailure {
+            val reason = it.message ?: "解锁失败"
             _state.update { it.copy(unlocking = false, unlockStatus = null) }
-            showError(it.message ?: "解锁失败")
+            showError(reason)
+            notifier.notifyUnlockFailed(deviceName, reason)
         }
     }
 
 
     fun startPointsTask(userAgent: String) = viewModelScope.launch {
         if (state.value.runningPointsTask) return@launch
+        var outcome: PointsTaskResult? = null
+        var failureReason: String? = null
         runCatching {
-            _state.update {
-                it.copy(
-                    runningPointsTask = true,
-                    pointsLogs = listOf("准备执行自动化任务"),
-                )
-            }
+            _state.update { it.copy(runningPointsTask = true) }
+            _pointsLogs.value = listOf("准备执行自动化任务")
             pointsTaskRunner.run(userAgent) { line ->
                 appendPointLog(line)
             }
-        }.onSuccess {
+        }.onSuccess { result ->
+            outcome = result
             appendPointLog("任务流程结束")
             _state.update { it.copy(pointsTaskLastResult = "上次执行：已完成") }
         }.onFailure {
-            appendPointLog("任务失败：${it.message ?: "未知错误"}")
+            failureReason = it.message ?: "未知错误"
+            appendPointLog("任务失败：${failureReason}")
             _state.update { it.copy(pointsTaskLastResult = "上次执行：失败") }
         }
+        // 收尾：把窗口内剩余的日志立刻提交，别让最后几行延迟出现
+        flushLogsNow()
         _state.update { it.copy(runningPointsTask = false) }
+        // 任务要跑二十分钟量级，结束时用户多半已经离开 App —— 把结果送到通知栏
+        when (val reason = failureReason) {
+            null -> notifier.notifyTaskFinished(outcome?.gained, outcome?.pointsAfter)
+            else -> notifier.notifyTaskFailed(reason)
+        }
     }
 
+    /**
+     * 追加一行任务日志。
+     *
+     * **不逐行推状态**：日志是逐行产生的，若每行都推一次，界面就会跟着高频重组。
+     * 这里先入队，再由一个 [LOG_FLUSH_INTERVAL_MS] 的窗口批量提交 ——
+     * 这点延迟肉眼无感，重组次数却能降一个数量级。
+     */
     private fun appendPointLog(line: String) {
-        _state.update { state ->
-            val now = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(java.util.Date())
-            state.copy(pointsLogs = (state.pointsLogs + "[$now] $line").takeLast(500))
+        synchronized(pendingLogs) {
+            pendingLogs += "[${LocalTime.now().format(TIME_FORMAT)}] $line"
         }
+        if (logFlushJob?.isActive == true) return
+        logFlushJob = viewModelScope.launch {
+            while (true) {
+                delay(LOG_FLUSH_INTERVAL_MS)
+                if (!flushPendingLogs()) return@launch
+            }
+        }
+    }
+
+    /** 把队列里的日志一次性并入状态。返回 false 表示队列已空。 */
+    private fun flushPendingLogs(): Boolean {
+        val batch = synchronized(pendingLogs) {
+            val snapshot = pendingLogs.toList()
+            pendingLogs.clear()
+            snapshot
+        }
+        if (batch.isEmpty()) return false
+        _pointsLogs.update { (it + batch).takeLast(MAX_LOG_LINES) }
+        return true
+    }
+
+    /** 立即提交，不再等窗口（任务收尾时用）。 */
+    private fun flushLogsNow() {
+        logFlushJob?.cancel()
+        logFlushJob = null
+        flushPendingLogs()
     }
 
     fun showCurrentToken() {
@@ -509,13 +579,25 @@ class AppViewModel(
     private fun showError(message: String) {
         _state.update { it.copy(errorMessage = message) }
     }
+
+    private companion object {
+        /** 日志批量提交窗口：短到肉眼无感，长到足以合并同一批输出。 */
+        const val LOG_FLUSH_INTERVAL_MS = 120L
+
+        /** 日志最多保留行数，防止长时间运行后无限增长。 */
+        const val MAX_LOG_LINES = 500
+
+        /** 不可变且线程安全，可复用，避免每行日志都构造一次格式化器。 */
+        val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+    }
 }
 
 class AppViewModelFactory(
     private val repository: AppRepository,
+    private val notifier: AppNotifier,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return AppViewModel(repository) as T
+        return AppViewModel(repository, notifier) as T
     }
 }

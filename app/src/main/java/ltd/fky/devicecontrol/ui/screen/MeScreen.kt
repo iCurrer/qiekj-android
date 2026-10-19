@@ -1,5 +1,8 @@
 package ltd.fky.devicecontrol.ui.screen
 
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import android.webkit.WebSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -146,6 +150,17 @@ internal fun MeScreen(
                 icon = Icons.Outlined.Info,
                 title = "关于",
                 onClick = { vm.openRoute(AppRoute.About) },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 52.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            // 长任务结果靠通知送达；一旦权限被拒（Android 13 起拒绝两次就不再弹窗），
+            // 只能由用户从系统设置里手动开 —— 所以留一个无需权限即可到达的入口
+            ActionRow(
+                icon = Icons.Outlined.Notifications,
+                title = "通知设置",
+                onClick = { openAppNotificationSettings(context) },
             )
         }
 
@@ -287,3 +302,15 @@ private fun LoginCard(
 /** 手机号掩码：本次会话拿得到原号码就显示掩码，否则退化为「已登录」。 */
 private fun accountLabel(phone: String): String =
     if (phone.length >= 7) "${phone.take(3)}****${phone.takeLast(4)}" else "已登录"
+
+/**
+ * 跳到系统的「本应用通知设置」页。
+ *
+ * 系统设置页不归应用管，个别机型可能没有对应 Activity，
+ * 所以用 `runCatching` 兜住 —— 跳不过去也只是没反应，不该把界面弄崩。
+ */
+private fun openAppNotificationSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    runCatching { context.startActivity(intent) }
+}

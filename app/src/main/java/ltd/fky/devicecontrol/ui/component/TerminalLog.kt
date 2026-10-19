@@ -48,9 +48,11 @@ internal fun TerminalLogWindow(
 ) {
     val listState = rememberLazyListState()
 
+    // 用瞬时滚动而非动画：日志是连续追加的，动画会在每行到达时被打断重启，
+    // 观感反而卡顿。贴底本就是「看最新输出」的预期，不需要过渡过程。
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) {
-            listState.animateScrollToItem(lines.lastIndex)
+            listState.scrollToItem(lines.lastIndex)
         }
     }
 

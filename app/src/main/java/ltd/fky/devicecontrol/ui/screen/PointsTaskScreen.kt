@@ -14,6 +14,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,8 @@ internal fun PointsTaskScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 日志单独订阅：任务执行时它高频刷新，不该牵动本页其余部分（按钮、顶栏）一起重组
+    val logs by vm.pointsLogs.collectAsState()
 
     Column(
         modifier = Modifier
@@ -75,7 +79,7 @@ internal fun PointsTaskScreen(
         Spacer(Modifier.height(16.dp))
 
         TerminalLogWindow(
-            lines = state.pointsLogs,
+            lines = logs,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),

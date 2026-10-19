@@ -1,12 +1,18 @@
 package ltd.fky.devicecontrol
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -43,22 +49,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.viewmodel.compose.viewModel
-import ltd.fky.devicecontrol.data.AppRepository
-import ltd.fky.devicecontrol.data.DeviceCacheStore
-import ltd.fky.devicecontrol.data.DevicePrefsStore
-import ltd.fky.devicecontrol.data.OrderHistoryStore
-import ltd.fky.devicecontrol.data.TokenStore
-import ltd.fky.devicecontrol.widget.DeviceGlanceWidget
+import kotlin.coroutines.cancellation.CancellationException
 import ltd.fky.devicecontrol.ui.AppRoute
 import ltd.fky.devicecontrol.ui.AppUiState
 import ltd.fky.devicecontrol.ui.AppViewModel
-import ltd.fky.devicecontrol.ui.AppViewModelFactory
 import ltd.fky.devicecontrol.ui.DeviceTab
 import ltd.fky.devicecontrol.ui.PageWidth
 import ltd.fky.devicecontrol.ui.PageWidthBox
@@ -86,8 +86,9 @@ import ltd.fky.devicecontrol.ui.theme.XiaoGuaiTheme
  *
  * 界面层级只有两层：
  * - **Tab 层**：底部导航的两个目的地（设备 / 我的）
- * - **二级层**：按需进入的页面（积分任务执行页等），不占底部导航，
- *   带返回按钮并响应系统返回键
+ * - **二级层**：按需进入的页面（积分任务执行页等），不占底部导航，带返回按钮
+ *
+ * 二级层支持**预测式返回**：从屏幕边缘拖动时页面实时跟手，中途松手会弹回原位。
  *
  * 本文件只负责：主题装配、依赖构建、Intent 短路、导航壳与全局对话框。
  * 页面实现在 `ui/screen/`，通用组件在 `ui/component/`，对话框在 `ui/dialog/`。
@@ -99,20 +100,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             XiaoGuaiTheme {
-                val appContext = applicationContext
-                val repository = remember {
-                    AppRepository(
-                        tokenStore = TokenStore(appContext),
-                        orderHistoryStore = OrderHistoryStore(appContext),
-                        deviceCacheStore = DeviceCacheStore(appContext),
-                        devicePrefsStore = DevicePrefsStore(appContext),
-                        // 设备数据变化后刷新桌面卡片，让卡片与 App 数据保持一致
-                        onDevicesChanged = { DeviceGlanceWidget().updateAll(appContext) },
-                    )
-                }
-                val vm: AppViewModel = viewModel(
-                    factory = AppViewModelFactory(repository),
-                )
+                // 仓库由 Application 持有：全进程唯一，屏幕旋转 / 切换深浅色时
+                // 不会重建 OkHttp + Retrofit + Moshi，也不会与 ViewModel 里那份并存
+                val app = applicationContext as DeviceControlApplication
+                val vm: AppViewModel = viewModel(factory = app.viewModelFactory)
                 LaunchedEffect(vm) {
                     shortcutRequestFromIntent(intent)?.let(vm::openDeviceShortcut)
                 }
@@ -128,6 +119,68 @@ private fun DeviceControlApp(vm: AppViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val route = state.currentRoute
+
+    // ---------- 通知权限 ----------
+    // 两种长任务（积分任务 / 解锁）都要跑二十分钟量级，结果靠通知送达，
+    // 所以第一次进来就把权限要了。用户拒绝也不影响任何流程 ——
+    // AppNotifier 在无权限时静默跳过，只是送不到通知。
+    val notifier = remember {
+        (context.applicationContext as DeviceControlApplication).notifier
+    }
+    val requestNotificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* 拒绝无需处理：所有功能都不依赖通知 */ }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifier.canNotify()) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // ---------- 预测式返回 ----------
+
+    /**
+     * 二级层的返回进度：0 = 完全就位，1 = 完全退场。
+     *
+     * 由手势进度直接驱动（`snapTo`），所以页面是**跟手**的；
+     * 中途取消则弹回 0；走完则提交并关闭路由。
+     */
+    val backProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(route) {
+        if (route != null) {
+            // 进入：从右侧滑入
+            backProgress.snapTo(1f)
+            backProgress.animateTo(0f, tween(240))
+        } else {
+            backProgress.snapTo(0f)
+        }
+    }
+
+    // 兜底：三键导航的返回键 / 键盘返回键**不会**走预测式手势回调，
+    // 只靠 PredictiveBackHandler 会导致按返回键时无人接管 → 系统默认行为 → 直接退出 App。
+    // 这里补一个普通处理器，保证返回键同样能关掉二级页。
+    // 注册顺序 = 优先级反序（同组内后注册者优先），所以它写在 PredictiveBackHandler 之前，
+    // 手势返回仍由 PredictiveBackHandler 优先接管（保留跟手动画），按键返回则落到这里。
+    BackHandler(enabled = route != null) { vm.closeRoute() }
+
+    PredictiveBackHandler(enabled = route != null) { progress ->
+        // 记录事件流是否已推进到提交进度（按键返回可能「提交后立刻取消」）
+        var committed = false
+        try {
+            // 新版 activity 回调给的是 BackEventCompat，进度要从 event.progress 取
+            progress.collect { event ->
+                backProgress.snapTo(event.progress)
+                if (event.progress >= 1f) committed = true
+            }
+            vm.closeRoute()
+        } catch (cancellation: CancellationException) {
+            backProgress.animateTo(0f, animationSpec = tween(220))
+            // 已推进到 1f 说明是「提交」而非「中途取消」，同样要关闭
+            if (committed) vm.closeRoute()
+            throw cancellation
+        }
+    }
 
     LaunchedEffect(state.toastMessage) {
         val message = state.toastMessage ?: return@LaunchedEffect
@@ -232,8 +285,6 @@ private fun DeviceControlApp(vm: AppViewModel) {
         )
     }
 
-    BackHandler(enabled = route != null) { vm.closeRoute() }
-
     val useNavRail = rememberWindowWidthClass() != WindowWidthClass.Compact
 
     // 宽屏把导航从底部挪到左侧。两个理由：
@@ -270,7 +321,9 @@ private fun DeviceControlApp(vm: AppViewModel) {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 if (route == null && !useNavRail) {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
                         DeviceNavItem(
                             selected = state.currentTab == DeviceTab.Control,
                             onClick = { vm.selectTab(DeviceTab.Control) },
@@ -296,7 +349,15 @@ private fun DeviceControlApp(vm: AppViewModel) {
 
                 if (route != null) {
                     Surface(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val progress = backProgress.value
+                                // 跟手右移：progress 到 1 时整页移出屏幕，
+                                // 露出的正是下面的 Tab 层 —— 返回的目标是可见的
+                                translationX = size.width * progress
+                                alpha = 1f - progress * 0.25f
+                            },
                         color = MaterialTheme.colorScheme.background,
                     ) {
                         when (route) {
@@ -368,6 +429,12 @@ private fun TabLayer(
     }
 }
 
+/**
+ * 底部导航项。
+ *
+ * 与宽屏 Rail 项沿用同一套配色令牌，保证窗口跨过 600dp 断点、
+ * 导航在「底部 ⇄ 左侧」之间切换时视觉是连续的。
+ */
 @Composable
 private fun RowScope.DeviceNavItem(
     selected: Boolean,

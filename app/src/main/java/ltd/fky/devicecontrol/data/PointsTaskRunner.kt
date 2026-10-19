@@ -13,6 +13,24 @@ import okhttp3.Request
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
+/**
+ * 积分任务的执行结果。
+ *
+ * 之所以结构化回传，而不是让调用方去解析日志文本：任务结束后的通知要报出
+ * 「今日 +N」这种确切数字，从日志里正则捞太脆。
+ */
+data class PointsTaskResult(
+    val pointsBefore: Int?,
+    val pointsAfter: Int?,
+) {
+    /** 本次新增积分。任一时刻取不到余额就是 null —— 宁可不报，也不报错的数。 */
+    val gained: Int? get() = if (pointsBefore != null && pointsAfter != null) {
+        pointsAfter - pointsBefore
+    } else {
+        null
+    }
+}
+
 class PointsTaskRunner(
     private val tokenProvider: () -> String?,
 ) {
@@ -26,7 +44,7 @@ class PointsTaskRunner(
         .build()
         .adapter(Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java))
 
-    suspend fun run(userAgent: String, log: suspend (String) -> Unit) {
+    suspend fun run(userAgent: String, log: suspend (String) -> Unit): PointsTaskResult {
         // 签名密钥不随源码分发：未配置时先给出可读的提示，
         // 否则会在服务端变成看不出原因的"签名错误"
         check(BuildConfig.SIGN_SECRET_ANDROID.isNotBlank()) {
@@ -58,6 +76,7 @@ class PointsTaskRunner(
         val gained = after?.let { a -> before?.let { b -> a - b } }
         log("总积分：${after ?: "-"}，今日积分：${gained ?: "-"}")
         log("所有任务均已完成")
+        return PointsTaskResult(pointsBefore = before, pointsAfter = after)
     }
 
     private suspend fun signIn(token: String, ua: String, log: suspend (String) -> Unit) {
